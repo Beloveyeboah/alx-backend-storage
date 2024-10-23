@@ -1,44 +1,50 @@
 #!/usr/bin/env python3
 
 """
-we will implement a get_page
-function (prototype: def get_page(url: str) -> str:)
+we will implement a get_page function
+(prototype: def get_page(url: str)
 """
 
-import redis
 import requests
+import redis
+from typing import Callable
 from functools import wraps
 
-r = redis.Redis()
+
+# Connect to Redis
+cache = redis.Redis()
 
 
-def url_access_count(method):
-    """decorator for get_page function"""
-    @wraps(method)
-    def wrapper(url):
-        """wrapper function"""
-        key = "cached:" + url
-        cached_value = r.get(key)
-        if cached_value:
-            return cached_value.decode("utf-8")
+def cache_page(expiration: int = 10):
+    def decorator(func: Callable) -> Callable:
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            url = args[0]
+            cached_content = cache.get(url)
+            if cached_content:
+                return cached_content.decode('utf-8')
 
-            # Get new content and update cache
-        key_count = "count:" + url
-        html_content = method(url)
-
-        r.incr(key_count)
-        r.set(key, html_content, ex=10)
-        r.expire(key, 10)
-        return html_content
-    return wrapper
+            response = func(*args, **kwargs)
+            cache.setex(url, expiration, response)
+            return response
+        return wrapper
+    return decorator
 
 
-@url_access_count
+@cache_page()
 def get_page(url: str) -> str:
-    """obtain the HTML content of a particular"""
-    results = requests.get(url)
-    return results.text
+    """
+    Obtain the HTML content of a URL and return it.
+    Track how many times the URL was accessed
+    and cache the result for 10 seconds.
+    """
+    cache.incr(f"count:{url}")
+    response = requests.get(url)
+    return response.text
 
 
 if __name__ == "__main__":
-    get_page('http://slowwly.robertomurray.co.uk')
+    # Example usage
+    url = "http://slowwly.robertomurray.co.uk"
+    print(get_page(url))
+    print(f"URL accessed {cache.get(f'count:{url}').decode('utf-8')} times")
